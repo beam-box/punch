@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>打刻テスト</title>
+</head>
+<body>
+<h1>打刻ページ（テスト）</h1>
+<p>このページが表示されれば、公開は成功です。</p>
+<p id="now"></p>
+<script>
+document.getElementById('now').textContent = '現在時刻：' + new Date().toLocaleString('ja-JP');
+</script>
+</body>
+</html>
