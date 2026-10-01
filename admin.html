@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>勤怠 集計（管理者用）</title>
+<style>
+  :root {
+    --bg: #f5f6f4;
+    --panel: #ffffff;
+    --ink: #1f2a24;
+    --muted: #5d6b63;
+    --line: #d5dad6;
+    --accent: #1f4d7a;
+    --ok: #1f6f4a;
+    --ng: #b3261e;
+    --warn-bg: #fff4e0;
+    --warn-line: #e0b060;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 20px 16px 64px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+    line-height: 1.6;
+  }
+  main { max-width: 1040px; margin: 0 auto; }
+  h1 { font-size: 1.3rem; margin: 0 0 16px; }
+  h2 { font-size: 1.05rem; margin: 0 0 10px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; min-width: 140px; }
+  .field.grow { flex: 1; min-width: 220px; }
+  label { font-size: 0.8rem; color: var(--muted); margin-bottom: 2px; }
+  input, select {
+    padding: 9px 10px;
+    font-size: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--ink);
+    font-family: inherit;
+  }
+  input:focus-visible, select:focus-visible, button:focus-visible { outline: 3px solid #7fa6cf; outline-offset: 2px; }
+  button {
+    padding: 10px 16px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #fff;
+    background: var(--accent);
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  button.sub { background: #fff; color: var(--ink); border: 1px solid var(--line); font-weight: 400; }
+  button.small { padding: 4px 10px; font-size: 0.8rem; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .msg { margin: 10px 0 0; font-weight: 700; }
+  .msg.ok { color: var(--ok); }
+  .msg.ng { color: var(--ng); }
+  .hint { font-size: 0.8rem; color: var(--muted); margin: 6px 0 0; }
+  .warns { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 10px 14px; margin: 12px 0; }
+  .warns ul { margin: 4px 0 0; padding-left: 20px; }
+  .tablewrap { overflow-x: auto; margin-top: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.88rem; white-space: nowrap; }
+  th, td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: right; }
+  th { background: #eef1ee; font-weight: 700; position: sticky; top: 0; }
+  td.l, th.l { text-align: left; }
+  td.note { white-space: normal; min-width: 200px; text-align: left; }
+  tr.total td { font-weight: 700; background: #f0f4f8; border-top: 2px solid var(--line); }
+  tr.sat td.date { color: #1f5fa8; }
+  tr.sun td.date { color: #b3261e; }
+  .tag { display: inline-block; padding: 0 8px; border-radius: 10px; font-size: 0.75rem; border: 1px solid var(--line); }
+  .tag.fix { background: #fde8e6; border-color: #e5a29b; }
+  .tag.old { background: #eaeef8; border-color: #aab6dc; }
+  .tag.punch { background: #e5f3ea; border-color: #9cc9ad; }
+  .summary { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 8px; }
+  .summary div { min-width: 110px; }
+  .summary .v { font-size: 1.3rem; font-weight: 700; }
+  .summary .k { font-size: 0.78rem; color: var(--muted); }
+  pre.log { white-space: pre-wrap; word-break: break-all; font-size: 0.85rem; margin: 8px 0 0; font-family: inherit; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>勤怠 集計（管理者用）</h1>
+
+  <!-- 1. 接続 -->
+  <section class="panel" id="connectPanel">
+    <h2>1. 管理者PIN</h2>
+    <div class="row">
+      <div class="field grow">
+        <label for="adminPin">管理者PIN</label>
+        <input id="adminPin" type="password" autocomplete="off" placeholder="管理者PINを入力">
+      </div>
+      <button id="btnConnect" type="button">接続</button>
+    </div>
+    <p class="hint">PINはこのページを閉じると消えます。</p>
+    <p id="connectMsg" class="msg"></p>
+  </section>
+
+  <div id="mainArea" hidden>
+
+    <!-- 2. 集計 -->
+    <section class="panel">
+      <h2>2. 集計</h2>
+      <div class="row">
+        <div class="field">
+          <label for="empSel">社員</label>
+          <select id="empSel"></select>
+        </div>
+        <div class="field">
+          <label for="fromDate">開始日</label>
+          <input id="fromDate" type="date">
+        </div>
+        <div class="field">
+          <label for="toDate">終了日</label>
+          <input id="toDate" type="date">
+        </div>
+        <button id="btnThis" class="sub" type="button">今期（11日〜翌月10日）</button>
+        <button id="btnPrev" class="sub" type="button">前期</button>
+        <button id="btnRun" type="button">集計する</button>
+      </div>
+      <p id="runMsg" class="msg"></p>
+
+      <div id="result" hidden>
+        <div id="warns" class="warns" hidden></div>
+        <div class="summary" id="summary"></div>
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="l">日付</th><th>出勤</th><th>退勤</th><th>休憩(h)</th><th>総労働(h)</th>
+                <th>所定内(h)</th><th>時間外(h)</th><th>深夜(h)</th><th class="l">区分</th><th class="l">備考</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+        <p class="hint">時間はすべて10進法の「時間」で表示します（例：6時間25分＝6.42）。合計は分単位で足し上げてから変換しています。</p>
+        <div class="row" style="margin-top:10px;">
+          <button id="btnCsv" class="sub" type="button">この集計をCSVで保存</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. 修正 -->
+    <section class="panel">
+      <h2>3. 修正（日報に合わせて時刻を直す）</h2>
+      <p class="hint" style="margin-top:0;">元の打刻や旧データは消さずに、「修正」ファイルをBoxに追加します。表の「修正」ボタンで日付と時刻が入ります。</p>
+      <div class="row" style="margin-top:10px;">
+        <div class="field">
+          <label for="fixDate">対象日</label>
+          <input id="fixDate" type="date">
+        </div>
+        <div class="field">
+          <label for="fixIn">出勤（例 09:00）</label>
+          <input id="fixIn" type="text" placeholder="HH:MM" maxlength="5">
+        </div>
+        <div class="field">
+          <label for="fixOut">退勤（例 18:30、24:00も可）</label>
+          <input id="fixOut" type="text" placeholder="HH:MM" maxlength="5">
+        </div>
+        <div class="field">
+          <label for="fixBreak">休憩（分）空欄＝自動</label>
+          <input id="fixBreak" type="text" inputmode="numeric" placeholder="自動" maxlength="4">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div class="field grow">
+          <label for="fixReason">修正理由（必須）</label>
+          <input id="fixReason" type="text" placeholder="例：退勤の打刻漏れ">
+        </div>
+        <div class="field grow">
+          <label for="fixBasis">根拠（日報など）</label>
+          <input id="fixBasis" type="text" placeholder="例：10/2付の日報">
+        </div>
+        <div class="field">
+          <label for="fixWho">修正者（必須）</label>
+          <input id="fixWho" type="text" placeholder="氏名">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <label style="display:flex;align-items:center;gap:6px;margin:0;font-size:0.9rem;color:var(--ink);">
+          <input id="fixZero" type="checkbox"> 勤務なし（この日を0時間にする）
+        </label>
+        <button id="btnFix" type="button">修正を保存</button>
+      </div>
+      <p id="fixMsg" class="msg"></p>
+    </section>
+
+    <!-- 4. 旧データ取り込み -->
+    <section class="panel">
+      <h2>4. 旧システムのCSVを取り込む</h2>
+      <div class="row">
+        <div class="field grow">
+          <label for="legacyFile">旧システムのCSVファイル</label>
+          <input id="legacyFile" type="file" accept=".csv,text/csv">
+        </div>
+        <button id="btnImport" type="button" disabled>取り込む</button>
+      </div>
+      <pre id="importPreview" class="log"></pre>
+      <p id="importMsg" class="msg"></p>
+      <p class="hint">登録済みの社員の行だけを、その社員のBoxフォルダへ「過去データ」として保存します。元のファイルは変更されません。</p>
+    </section>
+  </div>
+</main>
+
+<script>
+// ==== CORE START ====
+// 画面に依存しない計算の部分（集計・時刻の処理）
+var STD_MIN = 420; // 所定労働時間（7時間）
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+function parseCsv(text) {
+  if (text.charCodeAt(0) === 0xFEFF) { text = text.slice(1); }
+  var rows = [], row = [], cell = '', q = false;
+  for (var i = 0; i < text.length; i++) {
+    var c = text.charAt(i);
+    if (q) {
+      if (c === '"') {
+        if (text.charAt(i + 1) === '"') { cell += '"'; i++; } else { q = false; }
+      } else { cell += c; }
+    } else if (c === '"') { q = true; }
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text.charAt(i + 1) === '\n') { i++; }
+      row.push(cell); cell = ''; rows.push(row); row = [];
+    } else { cell += c; }
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(function (r) { return !(r.length === 1 && r[0] === ''); });
+}
+
+function csvLine(cells) {
+  return cells.map(function (v) {
+    var s = String(v === null || v === undefined ? '' : v);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }).join(',');
+}
+
+// 'HH:MM'（'24:00'も可）→ 分。空や不正は null
+function hhmmToMin(s) {
+  var m = /^(\d{1,2}):(\d{2})$/.exec(String(s === null || s === undefined ? '' : s).trim());
+  if (!m) { return null; }
+  var h = Number(m[1]), mi = Number(m[2]);
+  if (mi > 59) { return null; }
+  return h * 60 + mi;
+}
+
+function minToHHMM(min) { return pad2(Math.floor(min / 60)) + ':' + pad2(min % 60); }
+
+// 分 → 10進法の時間（小数第2位まで）
+function dec(min) { return (Math.round(min / 60 * 100) / 100).toFixed(2); }
+
+// 日付と「日番号」の変換（日番号＝1970-01-01からの日数。日本時間のまま扱う）
+function dateToDay(s) {
+  var m = /^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/.exec(String(s).trim());
+  if (!m) { return null; }
+  return Math.round(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 86400000);
+}
+function dayToDate(day) { return new Date(day * 86400000).toISOString().slice(0, 10); }
+function dayToWeekday(day) { return ['日', '月', '火', '水', '木', '金', '土'][new Date(day * 86400000).getUTCDay()]; }
+
+function overlap(a1, a2, b1, b2) { return Math.max(0, Math.min(a2, b2) - Math.max(a1, b1)); }
+
+// 休憩の自動ルール（1日分の区間の長さで決める）：6時間超→1時間、12時間超→2時間、18時間超→3時間
+function autoBreak(span) { return span > 1080 ? 180 : (span > 720 ? 120 : (span > 360 ? 60 : 0)); }
+
+// 1日分の区間（start〜end、0〜1440分）から各時間を計算する。brk が null なら休憩は自動
+function metricsFor(start, end, brk) {
+  var span = end - start;
+  var b = (brk === null || brk === undefined) ? autoBreak(span) : brk;
+  var total = Math.max(0, span - b);
+  return {
+    start: start, end: end, span: span, brk: b, total: total,
+    sched: Math.min(total, STD_MIN),
+    over: Math.max(0, total - STD_MIN),
+    night: overlap(start, end, 0, 300) + overlap(start, end, 1320, 1440) // 深夜＝22:00〜翌5:00（休憩は引かない）
+  };
+}
+
+// 打刻ファイル名 → 種類・社員ID・時刻（分）。名前が合わなければ null
+function parsePunchName(name) {
+  var m = /^(出勤|退勤)_(\d+)_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})\.csv$/.exec(name);
+  if (!m) { return null; }
+  var ms = Date.UTC(Number(m[3]), Number(m[4]) - 1, Number(m[5]), Number(m[6]), Number(m[7]), Number(m[8]));
+  return { kind: m[1], empId: m[2], min: Math.floor(ms / 60000) }; // 秒は切り捨て
+}
+
+function fmtMinStamp(min) {
+  var d = new Date(min * 60000);
+  return pad2(d.getUTCMonth() + 1) + '/' + pad2(d.getUTCDate()) + ' ' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes());
+}
+
+// 打刻の名前一覧 → 日ごとの区間（0時でまたいで分割）と、打刻漏れなどの注意
+function buildPunchSegments(names, empId) {
+  var ev = [];
+  names.forEach(function (n) {
+    var p = parsePunchName(n);
+    if (p && p.empId === empId) { ev.push(p); }
+  });
+  ev.sort(function (a, b) {
+    return (a.min - b.min) || ((a.kind === '出勤' ? 0 : 1) - (b.kind === '出勤' ? 0 : 1));
+  });
+
+  var segs = [], warns = [], open = null;
+
+  function addSplit(inMin, outMin) {
+    var d0 = Math.floor(inMin / 1440), d1 = Math.floor(outMin / 1440);
+    for (var d = d0; d <= d1; d++) {
+      var s = Math.max(inMin, d * 1440) - d * 1440;
+      var e = Math.min(outMin, (d + 1) * 1440) - d * 1440;
+      if (e > s) { segs.push({ day: d, start: s, end: e }); }
+    }
+  }
+
+  ev.forEach(function (e) {
+    if (e.kind === '出勤') {
+      if (open) {
+        warns.push({ day: Math.floor(open.min / 1440), text: fmtMinStamp(open.min) + ' の出勤に対応する退勤の打刻がありません' });
+      }
+      open = e;
+    } else {
+      if (!open) {
+        warns.push({ day: Math.floor(e.min / 1440), text: fmtMinStamp(e.min) + ' の退勤に対応する出勤の打刻がありません' });
+      } else {
+        if (e.min <= open.min) {
+          warns.push({ day: Math.floor(open.min / 1440), text: fmtMinStamp(open.min) + ' の出勤と退勤が同じ時刻です' });
+        } else {
+          addSplit(open.min, e.min);
+        }
+        open = null;
+      }
+    }
+  });
+  if (open) {
+    warns.push({ day: Math.floor(open.min / 1440), text: fmtMinStamp(open.min) + ' に出勤。退勤の打刻はまだありません（勤務中の場合は問題ありません）' });
+  }
+  return { segs: segs, warns: warns };
+}
+
+// 旧システムのCSV → 日ごとの区間。旧システムの時間（休憩・所定内・時間外・深夜）はそのまま使う
+function parseLegacy(text, empId) {
+  var rows = parseCsv(text);
+  if (rows.length < 2) { return []; }
+  var h = rows[0];
+  function col(name) { return h.indexOf(name); }
+  var iEmp = col('従業員番号'), iDate = col('出勤日'), iIn = col('出勤時刻'), iOut = col('退勤時刻');
+  var iBrk = col('休憩時間'), iTot = col('実労働時間'), iSch = col('所定内労働時間'), iOvr = col('時間外労働時間'), iNgt = col('深夜労働時間');
+  if (iTot < 0) { iTot = col('総労働時間'); }
+  if (iDate < 0 || iIn < 0 || iOut < 0) { return []; }
+  var haveVals = iBrk >= 0 && iTot >= 0 && iSch >= 0 && iOvr >= 0 && iNgt >= 0;
+  var out = [];
+  for (var r = 1; r < rows.length; r++) {
+    var row = rows[r];
+    if (iEmp >= 0 && String(row[iEmp]).trim() !== empId) { continue; }
+    var day = dateToDay(row[iDate]);
+    var s = hhmmToMin(row[iIn]), e = hhmmToMin(row[iOut]);
+    if (day === null || s === null || e === null) { continue; }
+    if (e <= s) { e += 1440; } // 退勤 00:00 は翌0時（24:00）として扱う
+    if (haveVals) {
+      out.push({
+        day: day, start: s, end: e, span: e - s,
+        brk: hhmmToMin(row[iBrk]) || 0, total: hhmmToMin(row[iTot]) || 0,
+        sched: hhmmToMin(row[iSch]) || 0, over: hhmmToMin(row[iOvr]) || 0, night: hhmmToMin(row[iNgt]) || 0
+      });
+    } else {
+      var m = metricsFor(s, e, null);
+      m.day = day;
+      out.push(m);
+    }
+  }
+  return out;
+}
+
+// 修正CSV → 修正の一覧
+function parseCorrections(text) {
+  var rows = parseCsv(text);
+  if (rows.length < 2) { return []; }
+  var h = rows[0];
+  function col(name) { return h.indexOf(name); }
+  var iDay = col('対象日'), iIn = col('出勤'), iOut = col('退勤'), iBrk = col('休憩分');
+  var iReason = col('理由'), iBasis = col('根拠'), iWho = col('修正者'), iAt = col('修正日時');
+  if (iDay < 0) { return []; }
+  var out = [];
+  for (var r = 1; r < rows.length; r++) {
+    var row = rows[r];
+    var day = dateToDay(row[iDay]);
+    if (day === null) { continue; }
+    var s = iIn >= 0 ? hhmmToMin(row[iIn]) : null;
+    var e = iOut >= 0 ? hhmmToMin(row[iOut]) : null;
+    var bt = iBrk >= 0 ? String(row[iBrk]).trim() : '';
+    out.push({
+      day: day,
+      hasWork: s !== null && e !== null && e > s,
+      start: s, end: e,
+      brk: bt === '' ? null : Number(bt),
+      reason: iReason >= 0 ? row[iReason] : '',
+      basis: iBasis >= 0 ? row[iBasis] : '',
+      who: iWho >= 0 ? row[iWho] : '',
+      at: iAt >= 0 ? row[iAt] : ''
+    });
+  }
+  return out;
+}
+
+// 集計。優先順位：修正 ＞ 打刻 ＞ 旧データ
+// inp: { empId, punchNames:[名前], legacyTexts:[CSV本文], corrFiles:[{name,text}], fromDay, toDay }
+function aggregate(inp) {
+  var pun = buildPunchSegments(inp.punchNames, inp.empId);
+  var legacy = [];
+  inp.legacyTexts.forEach(function (t) { legacy = legacy.concat(parseLegacy(t, inp.empId)); });
+
+  var corrs = {};
+  inp.corrFiles.slice().sort(function (a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); })
+    .forEach(function (f) {
+      parseCorrections(f.text).forEach(function (c) { corrs[c.day] = c; }); // 新しい修正が古い修正を上書き
+    });
+
+  var byDay = {};
+  function slot(day) { if (!byDay[day]) { byDay[day] = { punch: [], legacy: [] }; } return byDay[day]; }
+  pun.segs.forEach(function (s) { slot(s.day).punch.push(s); });
+  legacy.forEach(function (s) { slot(s.day).legacy.push(s); });
+  Object.keys(corrs).forEach(function (k) { slot(Number(k)); });
+
+  var days = Object.keys(byDay).map(Number).filter(function (d) { return d >= inp.fromDay && d <= inp.toDay; })
+    .sort(function (a, b) { return a - b; });
+
+  var rows = [];
+  var tot = { total: 0, sched: 0, over: 0, night: 0, brk: 0, workDays: 0 };
+
+  days.forEach(function (day) {
+    var sl = byDay[day], corr = corrs[day], segs, src, note = '';
+    if (corr) {
+      src = '修正';
+      segs = corr.hasWork ? [metricsFor(corr.start, corr.end, corr.brk)] : [];
+      note = '修正：' + (corr.reason || '') + (corr.basis ? '（根拠：' + corr.basis + '）' : '');
+      if (sl.punch.length) { note += ' ／元の打刻あり'; }
+      else if (sl.legacy.length) { note += ' ／元の旧データあり'; }
+    } else if (sl.punch.length) {
+      src = '打刻';
+      segs = sl.punch.map(function (s) { return metricsFor(s.start, s.end, null); });
+      if (sl.legacy.length) { note = '旧データと重複（打刻を採用）'; }
+    } else {
+      src = '旧データ';
+      segs = sl.legacy;
+    }
+
+    var row = { day: day, date: dayToDate(day), wd: dayToWeekday(day), src: src, note: note,
+      inMin: null, outMin: null, brk: 0, total: 0, sched: 0, over: 0, night: 0 };
+    segs.forEach(function (m) {
+      row.inMin = row.inMin === null ? m.start : Math.min(row.inMin, m.start);
+      row.outMin = row.outMin === null ? m.end : Math.max(row.outMin, m.end);
+      row.brk += m.brk; row.total += m.total; row.sched += m.sched; row.over += m.over; row.night += m.night;
+    });
+    if (segs.length > 1) { row.note = (row.note ? row.note + ' ／' : '') + segs.length + '件の勤務を合算'; }
+    rows.push(row);
+
+    tot.brk += row.brk; tot.total += row.total; tot.sched += row.sched; tot.over += row.over; tot.night += row.night;
+    if (row.total > 0) { tot.workDays += 1; }
+  });
+
+  // 修正済みの日の注意は出さない
+  var warns = pun.warns.filter(function (w) {
+    return w.day >= inp.fromDay && w.day <= inp.toDay && !corrs[w.day];
+  });
+
+  return { rows: rows, totals: tot, warns: warns };
+}
+// ==== CORE END ====
+
+// ============================================================
+// 画面の処理
+// ============================================================
+(function () {
+  var API_BASE = 'https://punch-api.beambox0052.workers.dev';
+
+  var adminPin = '';
+  var emps = [];          // [{id, name}]
+  var last = null;        // 直近の集計結果 { empId, empName, from, to, agg }
+  var importPlan = [];    // 取り込み予定
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function setMsg(id, text, cls) { var el = $(id); el.textContent = text; el.className = 'msg' + (cls ? ' ' + cls : ''); }
+
+  async function api(path, payload) {
+    payload.pin = adminPin;
+    var res;
+    try {
+      res = await fetch(API_BASE + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (e) {
+      return { ok: false, data: { ok: false, message: '通信できませんでした。電波の状態を確認してください。' } };
+    }
+    var data = await res.json().catch(function () { return {}; });
+    return { ok: res.ok && data.ok, status: res.status, data: data };
+  }
+
+  function errText(r) {
+    var d = r.data || {};
+    return (d.message || '原因を取得できませんでした。') + (d.detail ? '（' + d.detail + '）' : '');
+  }
+
+  // ---------- 接続 ----------
+  async function connect() {
+    adminPin = $('adminPin').value;
+    if (!adminPin) { setMsg('connectMsg', '管理者PINを入力してください。', 'ng'); return; }
+    $('btnConnect').disabled = true;
+    setMsg('connectMsg', '接続中です…', '');
+    var r = await api('/admin/employees', {});
+    $('btnConnect').disabled = false;
+    if (!r.ok) { setMsg('connectMsg', errText(r), 'ng'); adminPin = ''; return; }
+
+    emps = r.data.employees || [];
+    $('empSel').innerHTML = emps.map(function (e) {
+      return '<option value="' + esc(e.id) + '">' + esc(e.name) + '（' + esc(e.id) + '）</option>';
+    }).join('');
+    setMsg('connectMsg', '接続しました。', 'ok');
+    $('mainArea').hidden = false;
+    setPeriod(0);
+  }
+
+  // ---------- 期間 ----------
+  function ymd(y, m, d) { return y + '-' + pad2(m) + '-' + pad2(d); }
+
+  // 11日〜翌月10日の期間。offset=0 が今期、-1 が前期
+  function setPeriod(offset) {
+    var now = new Date();
+    var y = now.getFullYear(), m = now.getMonth() + 1;
+    if (now.getDate() < 11) { m -= 1; }
+    m += offset;
+    var from = new Date(y, m - 1, 11);
+    var to = new Date(y, m, 10);
+    $('fromDate').value = ymd(from.getFullYear(), from.getMonth() + 1, from.getDate());
+    $('toDate').value = ymd(to.getFullYear(), to.getMonth() + 1, to.getDate());
+  }
+
+  // ---------- 集計 ----------
+  async function readFilesInChunks(empId, files) {
+    var texts = {};
+    for (var i = 0; i < files.length; i += 20) {
+      var chunk = files.slice(i, i + 20);
+      var r = await api('/admin/read', { empId: empId, fileIds: chunk.map(function (f) { return f.id; }) });
+      if (!r.ok) { throw new Error(errText(r)); }
+      (r.data.files || []).forEach(function (f) {
+        if (f.text !== undefined) { texts[f.id] = f.text; }
+      });
+    }
+    return texts;
+  }
+
+  async function runAggregate() {
+    var empId = $('empSel').value;
+    var fromDay = dateToDay($('fromDate').value), toDay = dateToDay($('toDate').value);
+    if (!empId) { setMsg('runMsg', '社員を選んでください。', 'ng'); return; }
+    if (fromDay === null || toDay === null || fromDay > toDay) {
+      setMsg('runMsg', '期間（開始日・終了日）を確認してください。', 'ng'); return;
+    }
+
+    $('btnRun').disabled = true;
+    setMsg('runMsg', 'Boxから読み込み中です…', '');
+    try {
+      var lr = await api('/admin/list', { empId: empId });
+      if (!lr.ok) { throw new Error(errText(lr)); }
+      var files = lr.data.files || [];
+
+      var punchNames = files.map(function (f) { return f.name; }).filter(function (n) { return parsePunchName(n); });
+      var legacyFiles = files.filter(function (f) { return f.name.indexOf('過去データ_' + empId + '_') === 0; });
+      var corrFiles = files.filter(function (f) { return f.name.indexOf('修正_' + empId + '_') === 0; });
+
+      var texts = await readFilesInChunks(empId, legacyFiles.concat(corrFiles));
+
+      var agg = aggregate({
+        empId: empId,
+        punchNames: punchNames,
+        legacyTexts: legacyFiles.map(function (f) { return texts[f.id]; }).filter(function (t) { return t !== undefined; }),
+        corrFiles: corrFiles.filter(function (f) { return texts[f.id] !== undefined; })
+          .map(function (f) { return { name: f.name, text: texts[f.id] }; }),
+        fromDay: fromDay, toDay: toDay
+      });
+
+      var emp = emps.filter(function (e) { return e.id === empId; })[0];
+      last = { empId: empId, empName: emp ? emp.name : '', from: $('fromDate').value, to: $('toDate').value, agg: agg };
+      render();
+
+      var unread = (legacyFiles.length + corrFiles.length) - Object.keys(texts).length;
+      var msg = '集計しました。（打刻 ' + punchNames.length + '件、旧データ ' + legacyFiles.length + 'ファイル、修正 ' + corrFiles.length + 'ファイル）';
+      if (lr.data.truncated) { msg += ' ※ファイルが多いため、一部を読み込めていません。'; }
+      if (unread > 0) { msg += ' ※読み込めなかったファイルが ' + unread + ' 件あります。'; }
+      setMsg('runMsg', msg, (lr.data.truncated || unread > 0) ? 'ng' : 'ok');
+    } catch (e) {
+      setMsg('runMsg', '集計できませんでした：' + e.message, 'ng');
+    } finally {
+      $('btnRun').disabled = false;
+    }
+  }
+
+  function tagFor(src) {
+    var cls = src === '修正' ? 'fix' : (src === '旧データ' ? 'old' : 'punch');
+    return '<span class="tag ' + cls + '">' + esc(src) + '</span>';
+  }
+
+  function render() {
+    var agg = last.agg;
+    $('result').hidden = false;
+
+    // 注意
+    var w = $('warns');
+    if (agg.warns.length) {
+      w.hidden = false;
+      w.innerHTML = '<strong>確認が必要な打刻</strong><ul>' + agg.warns.map(function (x) {
+        return '<li>' + esc(x.text) + '</li>';
+      }).join('') + '</ul>日報に合わせて、下の「修正」で出勤・退勤を入力してください。';
+    } else {
+      w.hidden = true;
+    }
+
+    // 合計
+    var t = agg.totals;
+    $('summary').innerHTML =
+      '<div><div class="v">' + t.workDays + '日</div><div class="k">勤務日数</div></div>' +
+      '<div><div class="v">' + dec(t.total) + '</div><div class="k">総労働（時間）</div></div>' +
+      '<div><div class="v">' + dec(t.sched) + '</div><div class="k">所定内（時間）</div></div>' +
+      '<div><div class="v">' + dec(t.over) + '</div><div class="k">時間外（時間）</div></div>' +
+      '<div><div class="v">' + dec(t.night) + '</div><div class="k">深夜（時間）</div></div>';
+
+    // 表
+    var html = agg.rows.map(function (r) {
+      var cls = r.wd === '土' ? 'sat' : (r.wd === '日' ? 'sun' : '');
+      var inT = r.inMin === null ? '-' : minToHHMM(r.inMin);
+      var outT = r.outMin === null ? '-' : (r.outMin === 1440 ? '24:00' : minToHHMM(r.outMin % 1440));
+      return '<tr class="' + cls + '">' +
+        '<td class="l date">' + esc(r.date.slice(5).replace('-', '/')) + '（' + r.wd + '）</td>' +
+        '<td>' + inT + '</td><td>' + outT + '</td>' +
+        '<td>' + dec(r.brk) + '</td><td>' + dec(r.total) + '</td><td>' + dec(r.sched) + '</td>' +
+        '<td>' + dec(r.over) + '</td><td>' + dec(r.night) + '</td>' +
+        '<td class="l">' + tagFor(r.src) + '</td><td class="note">' + esc(r.note) + '</td>' +
+        '<td><button class="sub small" type="button" data-day="' + r.day + '">修正</button></td></tr>';
+    }).join('');
+    html += '<tr class="total"><td class="l">合計</td><td></td><td></td>' +
+      '<td>' + dec(t.brk) + '</td><td>' + dec(t.total) + '</td><td>' + dec(t.sched) + '</td>' +
+      '<td>' + dec(t.over) + '</td><td>' + dec(t.night) + '</td><td></td><td></td><td></td></tr>';
+    $('tbody').innerHTML = html;
+  }
+
+  // 表の「修正」ボタン → 修正フォームに値を入れる
+  function onTableClick(ev) {
+    var b = ev.target.closest('button[data-day]');
+    if (!b || !last) { return; }
+    var day = Number(b.getAttribute('data-day'));
+    var row = last.agg.rows.filter(function (r) { return r.day === day; })[0];
+    $('fixDate').value = dayToDate(day);
+    $('fixIn').value = row && row.inMin !== null ? minToHHMM(row.inMin) : '';
+    $('fixOut').value = row && row.outMin !== null ? (row.outMin === 1440 ? '24:00' : minToHHMM(row.outMin % 1440)) : '';
+    $('fixBreak').value = '';
+    $('fixZero').checked = false;
+    $('fixReason').focus();
+    $('fixReason').scrollIntoView({ block: 'center' });
+  }
+
+  // ---------- CSV保存 ----------
+  function exportCsv() {
+    if (!last) { return; }
+    var a = last.agg;
+    var lines = [['日付', '曜日', '出勤', '退勤', '休憩(h)', '総労働(h)', '所定内(h)', '時間外(h)', '深夜(h)', '区分', '備考']];
+    a.rows.forEach(function (r) {
+      lines.push([r.date, r.wd,
+        r.inMin === null ? '' : minToHHMM(r.inMin),
+        r.outMin === null ? '' : (r.outMin === 1440 ? '24:00' : minToHHMM(r.outMin % 1440)),
+        dec(r.brk), dec(r.total), dec(r.sched), dec(r.over), dec(r.night), r.src, r.note]);
+    });
+    lines.push(['合計', '', '', '', dec(a.totals.brk), dec(a.totals.total), dec(a.totals.sched), dec(a.totals.over), dec(a.totals.night), '', '勤務日数 ' + a.totals.workDays]);
+    var text = '\uFEFF' + lines.map(csvLine).join('\r\n') + '\r\n';
+    var blob = new Blob([text], { type: 'text/csv' });
+    var url = URL.createObjectURL(blob);
+    var el = document.createElement('a');
+    el.href = url;
+    el.download = '集計_' + last.empId + '_' + last.from.replace(/-/g, '') + '-' + last.to.replace(/-/g, '') + '.csv';
+    document.body.appendChild(el);
+    el.click();
+    document.body.removeChild(el);
+    URL.revokeObjectURL(url);
+  }
+
+  // ---------- 修正の保存 ----------
+  function nowIsoLocal() {
+    var d = new Date();
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + 'T' +
+      pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds()) + '+09:00';
+  }
+  function nowStamp() {
+    var d = new Date();
+    return d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + '_' + pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds());
+  }
+
+  async function saveFix() {
+    var empId = $('empSel').value;
+    var date = $('fixDate').value;
+    var zero = $('fixZero').checked;
+    var tin = $('fixIn').value.trim(), tout = $('fixOut').value.trim();
+    var brkText = $('fixBreak').value.trim();
+    var reason = $('fixReason').value.trim(), basis = $('fixBasis').value.trim(), who = $('fixWho').value.trim();
+
+    if (!empId || dateToDay(date) === null) { setMsg('fixMsg', '社員と対象日を確認してください。', 'ng'); return; }
+    if (!reason || !who) { setMsg('fixMsg', '修正理由と修正者を入力してください。', 'ng'); return; }
+
+    if (!zero) {
+      var s = hhmmToMin(tin), e = hhmmToMin(tout);
+      if (s === null || e === null || s > 1439 || e > 1440 || e <= s) {
+        setMsg('fixMsg', '出勤・退勤は HH:MM の形で、退勤が出勤より後になるように入力してください（24:00も可）。', 'ng'); return;
+      }
+      if (brkText !== '' && !/^\d{1,4}$/.test(brkText)) {
+        setMsg('fixMsg', '休憩（分）は数字だけで入力してください。', 'ng'); return;
+      }
+    } else {
+      tin = ''; tout = ''; brkText = '';
+    }
+
+    var emp = emps.filter(function (x) { return x.id === empId; })[0];
+    var text = csvLine(['社員ID', '社員名', '対象日', '出勤', '退勤', '休憩分', '理由', '根拠', '修正者', '修正日時']) + '\r\n' +
+      csvLine([empId, emp ? emp.name : '', date, tin, tout, brkText, reason, basis, who, nowIsoLocal()]) + '\r\n';
+    var fileName = '修正_' + empId + '_' + date.replace(/-/g, '') + '_' + nowStamp() + '.csv';
+
+    $('btnFix').disabled = true;
+    setMsg('fixMsg', '保存中です…', '');
+    var r = await api('/admin/save', { empId: empId, fileName: fileName, text: text });
+    $('btnFix').disabled = false;
+    if (!r.ok) { setMsg('fixMsg', '保存できませんでした：' + errText(r), 'ng'); return; }
+
+    setMsg('fixMsg', '修正を保存しました。集計を更新します。', 'ok');
+    // 期間内の日付なら再集計
+    var fd = dateToDay($('fromDate').value), td = dateToDay($('toDate').value), d = dateToDay(date);
+    if (fd !== null && td !== null && d >= fd && d <= td) { runAggregate(); }
+  }
+
+  // ---------- 旧データの取り込み ----------
+  function decodeBuffer(buf) {
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+    catch (e) { return new TextDecoder('shift_jis').decode(buf); }
+  }
+
+  async function onLegacyFile() {
+    importPlan = [];
+    $('btnImport').disabled = true;
+    $('importPreview').textContent = '';
+    setMsg('importMsg', '', '');
+    var f = $('legacyFile').files[0];
+    if (!f) { return; }
+
+    var text = decodeBuffer(await f.arrayBuffer());
+    var rows = parseCsv(text);
+    if (rows.length < 2) { setMsg('importMsg', 'データの行が見つかりません。', 'ng'); return; }
+    var h = rows[0];
+    var iEmp = h.indexOf('従業員番号'), iDate = h.indexOf('出勤日');
+    if (iEmp < 0 || iDate < 0) {
+      setMsg('importMsg', '旧システムのCSVとして読み取れません（「従業員番号」「出勤日」の列が必要です）。', 'ng'); return;
+    }
+
+    var groups = {};
+    for (var i = 1; i < rows.length; i++) {
+      var id = String(rows[i][iEmp]).trim();
+      if (!groups[id]) { groups[id] = []; }
+      groups[id].push(rows[i]);
+    }
+
+    var lines = [];
+    Object.keys(groups).forEach(function (id) {
+      var emp = emps.filter(function (e) { return e.id === id; })[0];
+      var list = groups[id];
+      var dates = list.map(function (r) { return String(r[iDate]).trim().replace(/\//g, '-'); }).sort();
+      var from = dates[0], to = dates[dates.length - 1];
+      if (!emp) {
+        lines.push('社員ID ' + id + '：登録されていない社員のため、取り込みません（' + list.length + '行）');
+        return;
+      }
+      var body = csvLine(h) + '\r\n' + list.map(csvLine).join('\r\n') + '\r\n';
+      importPlan.push({
+        empId: id, name: emp.name, count: list.length, from: from, to: to,
+        fileName: '過去データ_' + id + '_' + from.replace(/-/g, '') + '-' + to.replace(/-/g, '') + '.csv',
+        text: body
+      });
+      lines.push(emp.name + '（' + id + '）：' + list.length + '行、' + from + ' 〜 ' + to + ' → 取り込めます');
+    });
+
+    $('importPreview').textContent = lines.join('\n');
+    if (importPlan.length) { $('btnImport').disabled = false; }
+    else { setMsg('importMsg', '取り込める社員がいません。', 'ng'); }
+  }
+
+  async function runImport() {
+    if (!importPlan.length) { return; }
+    $('btnImport').disabled = true;
+    var results = [], allOk = true;
+    for (var i = 0; i < importPlan.length; i++) {
+      var p = importPlan[i];
+      setMsg('importMsg', p.name + ' を取り込み中です…', '');
+      var r = await api('/admin/save', { empId: p.empId, fileName: p.fileName, text: p.text });
+      if (r.ok) {
+        results.push(p.name + '：取り込みました（' + p.fileName + '）');
+      } else if (r.data && r.data.code === 'duplicate') {
+        allOk = false;
+        results.push(p.name + '：同じ期間のファイルがすでにあります（取り込み済みです）');
+      } else {
+        allOk = false;
+        results.push(p.name + '：失敗しました（' + errText(r) + '）');
+      }
+    }
+    $('importPreview').textContent = results.join('\n');
+    setMsg('importMsg', allOk ? '取り込みが完了しました。「集計する」で確認できます。' : '一部で取り込めませんでした。上の内容を確認してください。', allOk ? 'ok' : 'ng');
+    importPlan = [];
+  }
+
+  // ---------- 起動 ----------
+  $('btnConnect').addEventListener('click', connect);
+  $('adminPin').addEventListener('keydown', function (e) { if (e.key === 'Enter') { connect(); } });
+  $('btnThis').addEventListener('click', function () { setPeriod(0); });
+  $('btnPrev').addEventListener('click', function () { setPeriod(-1); });
+  $('btnRun').addEventListener('click', runAggregate);
+  $('btnCsv').addEventListener('click', exportCsv);
+  $('tbody').addEventListener('click', onTableClick);
+  $('btnFix').addEventListener('click', saveFix);
+  $('legacyFile').addEventListener('change', onLegacyFile);
+  $('btnImport').addEventListener('click', runImport);
+})();
+</script>
+</body>
+</html>
