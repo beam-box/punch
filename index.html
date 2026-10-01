@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>打刻ページ（Boxアップロード検証）</title>
+<title>打刻ページ（Boxログイン検証）</title>
 <style>
   :root {
     --bg: #f5f6f4;
@@ -13,6 +13,7 @@
     --line: #d5dad6;
     --in: #1f6f4a;
     --out: #9a4a1c;
+    --login: #1f4d7a;
     --ng: #b3261e;
   }
   * { box-sizing: border-box; }
@@ -26,6 +27,7 @@
   }
   main { max-width: 560px; margin: 0 auto; }
   h1 { font-size: 1.25rem; margin: 0 0 4px; }
+  h2 { font-size: 1rem; margin: 0 0 8px; }
   .lead { margin: 0 0 20px; color: var(--muted); font-size: 0.9rem; }
   .panel {
     background: var(--panel);
@@ -35,7 +37,7 @@
     margin-bottom: 16px;
   }
   label { display: block; font-size: 0.85rem; color: var(--muted); margin-top: 12px; }
-  label:first-child { margin-top: 0; }
+  label:first-of-type { margin-top: 0; }
   input {
     width: 100%;
     padding: 10px;
@@ -59,7 +61,22 @@
   }
   button.in { background: var(--in); }
   button.out { background: var(--out); }
+  button.login { background: var(--login); padding: 12px 16px; font-size: 1rem; margin-top: 12px; }
+  button.sub {
+    background: #fff;
+    color: var(--ink);
+    border: 1px solid var(--line);
+    padding: 8px 12px;
+    font-size: 0.9rem;
+    font-weight: 400;
+    margin-top: 12px;
+    margin-left: 8px;
+  }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
+  #loginState { margin: 12px 0 0; font-weight: 700; }
+  #loginState.ok { color: var(--in); }
+  #loginState.ng { color: var(--ng); }
+  #loginDetail { margin: 4px 0 0; font-size: 0.85rem; white-space: pre-wrap; word-break: break-all; }
   #status { min-height: 1.5em; font-weight: 700; margin: 0 0 8px; }
   #status.ok { color: var(--in); }
   #status.ng { color: var(--ng); }
@@ -68,14 +85,22 @@
 </head>
 <body>
 <main>
-  <h1>打刻ページ（Boxアップロード検証）</h1>
-  <p class="lead">ボタンを押した瞬間の時刻でCSVを作り、Boxの指定フォルダへ直接アップロードします。</p>
+  <h1>打刻ページ（Boxログイン検証）</h1>
+  <p class="lead">Boxにログインし、ボタンを押した瞬間の時刻でCSVを作って、指定フォルダへ直接アップロードします。</p>
 
   <section class="panel">
-    <label for="token">開発者トークン（60分で失効）</label>
-    <input id="token" type="password" autocomplete="off" placeholder="Boxの開発者コンソールで発行したトークン">
-    <p class="hint">このページには保存されません。ページを閉じると消えます。</p>
+    <h2>1. Boxにログイン</h2>
+    <label for="clientId">クライアントID</label>
+    <input id="clientId" type="text" autocomplete="off" placeholder="Box開発者コンソールの構成タブにあるクライアントID">
+    <p class="hint">クライアントシークレットは入力しないでください。</p>
+    <button id="btnLogin" class="login" type="button">Boxにログイン</button>
+    <button id="btnLogout" class="sub" type="button">ログアウト</button>
+    <p id="loginState"></p>
+    <p id="loginDetail"></p>
+  </section>
 
+  <section class="panel">
+    <h2>2. 打刻の設定</h2>
     <label for="folderId">アップロード先フォルダID</label>
     <input id="folderId" type="text" inputmode="numeric" autocomplete="off" placeholder="例：123456789012">
 
@@ -84,6 +109,7 @@
   </section>
 
   <section class="panel">
+    <h2>3. 打刻</h2>
     <div class="buttons">
       <button id="btnIn" class="in" type="button">出勤登録</button>
       <button id="btnOut" class="out" type="button">退勤登録</button>
@@ -98,14 +124,29 @@
 
 <script>
 (function () {
-  var statusEl = document.getElementById('status');
-  var detailEl = document.getElementById('detail');
+  var AUTH_URL = 'https://account.box.com/api/oauth2/authorize';
+  var TOKEN_URL = 'https://api.box.com/oauth2/token';
+  var ME_URL = 'https://api.box.com/2.0/users/me';
+  var UPLOAD_URL = 'https://upload.box.com/api/2.0/files/content';
+
+  var clientIdEl = document.getElementById('clientId');
+  var folderIdEl = document.getElementById('folderId');
+  var empNameEl = document.getElementById('empName');
+  var btnLogin = document.getElementById('btnLogin');
+  var btnLogout = document.getElementById('btnLogout');
   var btnIn = document.getElementById('btnIn');
   var btnOut = document.getElementById('btnOut');
+  var loginStateEl = document.getElementById('loginState');
+  var loginDetailEl = document.getElementById('loginDetail');
+  var statusEl = document.getElementById('status');
+  var detailEl = document.getElementById('detail');
 
+  // ログイン後に戻ってくるURL（Box開発者コンソールに登録したリダイレクトURIと完全一致が必要）
+  var REDIRECT_URI = location.origin + location.pathname;
+
+  // ---------- 共通の小さな関数 ----------
   function pad(n) { return String(n).padStart(2, '0'); }
 
-  // 例：2026-10-02T13:45:01+09:00
   function toIsoLocal(d) {
     var off = -d.getTimezoneOffset();
     var sign = off >= 0 ? '+' : '-';
@@ -115,7 +156,6 @@
       sign + pad(Math.floor(a / 60)) + ':' + pad(a % 60);
   }
 
-  // 例：20261002_134501
   function toStamp(d) {
     return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' +
       pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
@@ -131,9 +171,28 @@
     return s.replace(/[\\\/:*?"<>|\s]/g, '_');
   }
 
-  function setBusy(busy) {
-    btnIn.disabled = busy;
-    btnOut.disabled = busy;
+  function base64url(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) { s += String.fromCharCode(bytes[i]); }
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function randomString(byteLength) {
+    var arr = new Uint8Array(byteLength);
+    crypto.getRandomValues(arr);
+    return base64url(arr);
+  }
+
+  async function sha256Base64url(text) {
+    var data = new TextEncoder().encode(text);
+    var digest = await crypto.subtle.digest('SHA-256', data);
+    return base64url(new Uint8Array(digest));
+  }
+
+  function setLoginState(text, cls, detail) {
+    loginStateEl.textContent = text;
+    loginStateEl.className = cls || '';
+    loginDetailEl.textContent = detail || '';
   }
 
   function showStatus(text, cls) {
@@ -141,17 +200,147 @@
     statusEl.className = cls || '';
   }
 
+  function setBusy(busy) {
+    btnIn.disabled = busy;
+    btnOut.disabled = busy;
+  }
+
+  // ---------- ログイン（PKCE方式：クライアントシークレットを使わない） ----------
+  async function startLogin() {
+    var clientId = clientIdEl.value.trim();
+    if (!clientId) {
+      setLoginState('クライアントIDを入力してください。', 'ng', '');
+      return;
+    }
+    localStorage.setItem('punch_client_id', clientId);
+
+    var verifier = randomString(64);
+    var state = randomString(24);
+    var challenge = await sha256Base64url(verifier);
+
+    sessionStorage.setItem('punch_verifier', verifier);
+    sessionStorage.setItem('punch_state', state);
+
+    var url = AUTH_URL +
+      '?response_type=code' +
+      '&client_id=' + encodeURIComponent(clientId) +
+      '&redirect_uri=' + encodeURIComponent(REDIRECT_URI) +
+      '&state=' + encodeURIComponent(state) +
+      '&code_challenge=' + encodeURIComponent(challenge) +
+      '&code_challenge_method=S256';
+    location.href = url;
+  }
+
+  async function finishLoginIfReturned() {
+    var params = new URLSearchParams(location.search);
+    var code = params.get('code');
+    var err = params.get('error');
+    if (!code && !err) { return; }
+
+    // アドレス欄から code などを消す
+    history.replaceState(null, '', location.pathname);
+
+    if (err) {
+      setLoginState('ログインが完了しませんでした。', 'ng',
+        'エラー：' + err + '\n' + (params.get('error_description') || ''));
+      return;
+    }
+
+    var savedState = sessionStorage.getItem('punch_state');
+    var verifier = sessionStorage.getItem('punch_verifier');
+    var clientId = localStorage.getItem('punch_client_id') || '';
+    sessionStorage.removeItem('punch_state');
+    sessionStorage.removeItem('punch_verifier');
+
+    if (!savedState || params.get('state') !== savedState || !verifier) {
+      setLoginState('ログインが完了しませんでした。', 'ng',
+        '確認用の値が一致しません。もう一度「Boxにログイン」を押してください。');
+      return;
+    }
+
+    setLoginState('ログインを確認中です…', '', '');
+    try {
+      var res = await fetch(TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code: code,
+          client_id: clientId,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: verifier
+        })
+      });
+      var body = await res.json().catch(function () { return {}; });
+
+      if (res.ok && body.access_token) {
+        sessionStorage.setItem('punch_access_token', body.access_token);
+        var expiresAt = Date.now() + (body.expires_in || 3600) * 1000;
+        sessionStorage.setItem('punch_expires_at', String(expiresAt));
+        await showLoggedIn();
+      } else {
+        setLoginState('トークンの取得に失敗しました。', 'ng',
+          'HTTPステータス：' + res.status + '\n' +
+          'エラー：' + (body.error || '') + '\n' +
+          '内容：' + (body.error_description || body.message || '取得できませんでした。'));
+      }
+    } catch (e) {
+      setLoginState('トークンの取得に失敗しました。', 'ng',
+        '通信エラー：' + e.message + '\n' +
+        'CORSドメインの登録、またはBox側の仕様が原因の可能性があります。');
+    }
+  }
+
+  function getToken() {
+    var token = sessionStorage.getItem('punch_access_token');
+    var exp = Number(sessionStorage.getItem('punch_expires_at') || 0);
+    if (!token) { return null; }
+    if (Date.now() > exp - 30000) { return null; }
+    return token;
+  }
+
+  async function showLoggedIn() {
+    var token = getToken();
+    if (!token) { return; }
+    try {
+      var res = await fetch(ME_URL, { headers: { 'Authorization': 'Bearer ' + token } });
+      var me = await res.json().catch(function () { return {}; });
+      if (res.ok) {
+        setLoginState('ログイン中です。', 'ok',
+          '名前：' + (me.name || '') + '\nメール：' + (me.login || '') + '\nユーザーID：' + (me.id || ''));
+      } else {
+        setLoginState('ログイン中です（ユーザー情報は取得できませんでした）。', 'ok',
+          'HTTPステータス：' + res.status);
+      }
+    } catch (e) {
+      setLoginState('ログイン中です（ユーザー情報は取得できませんでした）。', 'ok', e.message);
+    }
+  }
+
+  function logout() {
+    sessionStorage.removeItem('punch_access_token');
+    sessionStorage.removeItem('punch_expires_at');
+    setLoginState('ログアウトしました。', '', '');
+  }
+
+  // ---------- 打刻 ----------
   async function punch(kind) {
     // 最初にボタンを押した時刻を確定する（通信に時間がかかっても変わらない）
     var pressed = new Date();
 
-    var token = document.getElementById('token').value.trim();
-    var folderId = document.getElementById('folderId').value.trim();
-    var empName = document.getElementById('empName').value.trim();
+    var folderId = folderIdEl.value.trim();
+    var empName = empNameEl.value.trim();
+    var token = getToken();
 
-    if (!token || !folderId || !empName) {
+    if (!token) {
+      showStatus('Boxにログインしていません。', 'ng');
+      detailEl.textContent = '上の「Boxにログイン」を押してから、もう一度打刻してください。\n' +
+        '打刻時刻（ボタンを押した時刻）：' + toIsoLocal(pressed);
+      return;
+    }
+    if (!folderId || !empName) {
       showStatus('未入力の項目があります。', 'ng');
-      detailEl.textContent = '開発者トークン、フォルダID、社員名をすべて入力してください。';
+      detailEl.textContent = 'フォルダIDと社員名を入力してください。';
       return;
     }
 
@@ -176,7 +365,7 @@
     detailEl.textContent = '打刻時刻（ボタンを押した時刻）：' + iso;
 
     try {
-      var res = await fetch('https://upload.box.com/api/2.0/files/content', {
+      var res = await fetch(UPLOAD_URL, {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + token },
         body: form
@@ -185,36 +374,41 @@
 
       if (res.ok && body.entries && body.entries[0]) {
         var f = body.entries[0];
-        var serverTime = f.created_at || '(取得できませんでした)';
         showStatus(kind + 'を登録しました。', 'ok');
         detailEl.textContent =
           'ファイル名：' + f.name + '\n' +
           '打刻時刻（ボタンを押した時刻）：' + iso + '\n' +
-          'Box上の作成日時：' + serverTime + '\n' +
+          'Box上の作成日時：' + (f.created_at || '(取得できませんでした)') + '\n' +
           'ファイルID：' + f.id;
       } else {
-        var msg = body.message || body.error_description || '原因を取得できませんでした。';
-        var code = body.code || body.error || '';
         showStatus(kind + 'の登録に失敗しました。', 'ng');
         detailEl.textContent =
           'HTTPステータス：' + res.status + '\n' +
-          'エラーコード：' + code + '\n' +
-          'メッセージ：' + msg + '\n' +
+          'エラーコード：' + (body.code || body.error || '') + '\n' +
+          'メッセージ：' + (body.message || body.error_description || '原因を取得できませんでした。') + '\n' +
           '打刻時刻（ボタンを押した時刻）：' + iso;
       }
     } catch (e) {
       showStatus(kind + 'の登録に失敗しました。', 'ng');
       detailEl.textContent =
         '通信エラー：' + e.message + '\n' +
-        '考えられる原因：BoxのCORSドメイン設定にこのページのドメインが未登録、またはネットワーク接続の問題です。\n' +
+        '考えられる原因：BoxのCORSドメイン設定、またはネットワーク接続の問題です。\n' +
         '打刻時刻（ボタンを押した時刻）：' + iso;
     } finally {
       setBusy(false);
     }
   }
 
+  // ---------- 起動時の処理 ----------
+  clientIdEl.value = localStorage.getItem('punch_client_id') || '';
+  btnLogin.addEventListener('click', function () { startLogin(); });
+  btnLogout.addEventListener('click', logout);
   btnIn.addEventListener('click', function () { punch('出勤'); });
   btnOut.addEventListener('click', function () { punch('退勤'); });
+
+  finishLoginIfReturned().then(function () {
+    if (getToken() && !loginStateEl.textContent) { showLoggedIn(); }
+  });
 })();
 </script>
 </body>
