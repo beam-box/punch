@@ -202,8 +202,18 @@
         pending = null;
         showStatus('この打刻はすでに登録されています。', 'ok', '押した時刻：' + pressedIso);
       } else if (data && data.code === 'auth_failed') {
-        pending = null;
-        showStatus('社員IDまたはPINが違います。', 'ng', '入力を確認して、もう一度押してください。');
+        // PINを直せば、押した時刻のまま送り直せる（30分以内）
+        pending = { kind: kind, pressedIso: pressedIso };
+        btnRetry.hidden = false;
+        showStatus('社員IDまたはPINが違います。', 'ng',
+          '入力を直してから「同じ時刻でもう一度送る」を押してください。\n押した時刻：' + pressedIso);
+      } else if (data && data.code === 'locked') {
+        pending = { kind: kind, pressedIso: pressedIso };
+        btnRetry.hidden = false;
+        showStatus('いまは打刻できません。', 'ng',
+          (data.message || '') + '\n押した時刻：' + pressedIso + '\n' +
+          '時間をおいて、PINを確認してから「同じ時刻でもう一度送る」を押してください。\n' +
+          '（押してから30分以上たつと、送信した時刻が採用されます）');
       } else {
         // サーバー側の問題：同じ時刻で再送できるようにする
         pending = { kind: kind, pressedIso: pressedIso };
