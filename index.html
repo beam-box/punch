@@ -3,14 +3,219 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>打刻テスト</title>
+<title>打刻ページ（Boxアップロード検証）</title>
+<style>
+  :root {
+    --bg: #f5f6f4;
+    --panel: #ffffff;
+    --ink: #1f2a24;
+    --muted: #5d6b63;
+    --line: #d5dad6;
+    --in: #1f6f4a;
+    --out: #9a4a1c;
+    --ng: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 20px 16px 48px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+    line-height: 1.7;
+  }
+  main { max-width: 560px; margin: 0 auto; }
+  h1 { font-size: 1.25rem; margin: 0 0 4px; }
+  .lead { margin: 0 0 20px; color: var(--muted); font-size: 0.9rem; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  label { display: block; font-size: 0.85rem; color: var(--muted); margin-top: 12px; }
+  label:first-child { margin-top: 0; }
+  input {
+    width: 100%;
+    padding: 10px;
+    font-size: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--ink);
+  }
+  input:focus-visible, button:focus-visible { outline: 3px solid #7fb69a; outline-offset: 2px; }
+  .hint { font-size: 0.8rem; color: var(--muted); margin: 4px 0 0; }
+  .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  button {
+    padding: 20px 8px;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #fff;
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  button.in { background: var(--in); }
+  button.out { background: var(--out); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  #status { min-height: 1.5em; font-weight: 700; margin: 0 0 8px; }
+  #status.ok { color: var(--in); }
+  #status.ng { color: var(--ng); }
+  #detail { margin: 0; font-size: 0.85rem; white-space: pre-wrap; word-break: break-all; color: var(--ink); }
+</style>
 </head>
 <body>
-<h1>打刻ページ（テスト）</h1>
-<p>このページが表示されれば、公開は成功です。</p>
-<p id="now"></p>
+<main>
+  <h1>打刻ページ（Boxアップロード検証）</h1>
+  <p class="lead">ボタンを押した瞬間の時刻でCSVを作り、Boxの指定フォルダへ直接アップロードします。</p>
+
+  <section class="panel">
+    <label for="token">開発者トークン（60分で失効）</label>
+    <input id="token" type="password" autocomplete="off" placeholder="Boxの開発者コンソールで発行したトークン">
+    <p class="hint">このページには保存されません。ページを閉じると消えます。</p>
+
+    <label for="folderId">アップロード先フォルダID</label>
+    <input id="folderId" type="text" inputmode="numeric" autocomplete="off" placeholder="例：123456789012">
+
+    <label for="empName">社員名</label>
+    <input id="empName" type="text" autocomplete="off" placeholder="例：山田太郎">
+  </section>
+
+  <section class="panel">
+    <div class="buttons">
+      <button id="btnIn" class="in" type="button">出勤登録</button>
+      <button id="btnOut" class="out" type="button">退勤登録</button>
+    </div>
+  </section>
+
+  <section class="panel" aria-live="polite">
+    <p id="status"></p>
+    <p id="detail"></p>
+  </section>
+</main>
+
 <script>
-document.getElementById('now').textContent = '現在時刻：' + new Date().toLocaleString('ja-JP');
+(function () {
+  var statusEl = document.getElementById('status');
+  var detailEl = document.getElementById('detail');
+  var btnIn = document.getElementById('btnIn');
+  var btnOut = document.getElementById('btnOut');
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  // 例：2026-10-02T13:45:01+09:00
+  function toIsoLocal(d) {
+    var off = -d.getTimezoneOffset();
+    var sign = off >= 0 ? '+' : '-';
+    var a = Math.abs(off);
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+      'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) +
+      sign + pad(Math.floor(a / 60)) + ':' + pad(a % 60);
+  }
+
+  // 例：20261002_134501
+  function toStamp(d) {
+    return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' +
+      pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+  }
+
+  function csvCell(v) {
+    var s = String(v);
+    if (/[",\r\n]/.test(s)) { s = '"' + s.replace(/"/g, '""') + '"'; }
+    return s;
+  }
+
+  function safeName(s) {
+    return s.replace(/[\\\/:*?"<>|\s]/g, '_');
+  }
+
+  function setBusy(busy) {
+    btnIn.disabled = busy;
+    btnOut.disabled = busy;
+  }
+
+  function showStatus(text, cls) {
+    statusEl.textContent = text;
+    statusEl.className = cls || '';
+  }
+
+  async function punch(kind) {
+    // 最初にボタンを押した時刻を確定する（通信に時間がかかっても変わらない）
+    var pressed = new Date();
+
+    var token = document.getElementById('token').value.trim();
+    var folderId = document.getElementById('folderId').value.trim();
+    var empName = document.getElementById('empName').value.trim();
+
+    if (!token || !folderId || !empName) {
+      showStatus('未入力の項目があります。', 'ng');
+      detailEl.textContent = '開発者トークン、フォルダID、社員名をすべて入力してください。';
+      return;
+    }
+
+    var iso = toIsoLocal(pressed);
+    var fileName = kind + '_' + safeName(empName) + '_' + toStamp(pressed) + '.csv';
+    var csv = '\uFEFF' +
+      '社員名,区分,打刻時刻\r\n' +
+      csvCell(empName) + ',' + csvCell(kind) + ',' + csvCell(iso) + '\r\n';
+
+    var form = new FormData();
+    // attributes は file より先に追加する（Boxの仕様）
+    form.append('attributes', JSON.stringify({
+      name: fileName,
+      parent: { id: folderId },
+      content_created_at: iso,
+      content_modified_at: iso
+    }));
+    form.append('file', new Blob([csv], { type: 'text/csv' }), fileName);
+
+    setBusy(true);
+    showStatus(kind + 'を送信中です…', '');
+    detailEl.textContent = '打刻時刻（ボタンを押した時刻）：' + iso;
+
+    try {
+      var res = await fetch('https://upload.box.com/api/2.0/files/content', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token },
+        body: form
+      });
+      var body = await res.json().catch(function () { return {}; });
+
+      if (res.ok && body.entries && body.entries[0]) {
+        var f = body.entries[0];
+        var serverTime = f.created_at || '(取得できませんでした)';
+        showStatus(kind + 'を登録しました。', 'ok');
+        detailEl.textContent =
+          'ファイル名：' + f.name + '\n' +
+          '打刻時刻（ボタンを押した時刻）：' + iso + '\n' +
+          'Box上の作成日時：' + serverTime + '\n' +
+          'ファイルID：' + f.id;
+      } else {
+        var msg = body.message || body.error_description || '原因を取得できませんでした。';
+        var code = body.code || body.error || '';
+        showStatus(kind + 'の登録に失敗しました。', 'ng');
+        detailEl.textContent =
+          'HTTPステータス：' + res.status + '\n' +
+          'エラーコード：' + code + '\n' +
+          'メッセージ：' + msg + '\n' +
+          '打刻時刻（ボタンを押した時刻）：' + iso;
+      }
+    } catch (e) {
+      showStatus(kind + 'の登録に失敗しました。', 'ng');
+      detailEl.textContent =
+        '通信エラー：' + e.message + '\n' +
+        '考えられる原因：BoxのCORSドメイン設定にこのページのドメインが未登録、またはネットワーク接続の問題です。\n' +
+        '打刻時刻（ボタンを押した時刻）：' + iso;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  btnIn.addEventListener('click', function () { punch('出勤'); });
+  btnOut.addEventListener('click', function () { punch('退勤'); });
+})();
 </script>
 </body>
 </html>
